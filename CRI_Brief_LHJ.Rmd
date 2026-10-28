@@ -1,0 +1,700 @@
+---
+output:
+  word_document: 
+    reference_docx: "Support Resources/template_cri.docx"
+params:
+  start_date:
+    label: "Enter Start Date: "
+    value: !r Sys.Date()-7
+    input: date
+  end_date:
+    label: "Enter End Date: "
+    value: !r Sys.Date() -1
+    input: date
+  data_source:
+    label: "Select a Data Source: Patient location will include data for all residents of the selected geography, treated at any ED in WA. Facility location will include data for all EDs in the selected geography."
+    value: "Facility Location"
+    choices:
+      - Patient Location
+      - Facility Location
+  geog:
+    label: "Select Geography"
+    value: "County - Adams"
+    choices:
+    - County - Adams
+    - County - Asotin
+    - County - Benton
+    - County - Chelan
+    - County - Clallam
+    - County - Clark
+    - County - Columbia
+    - County - Cowlitz
+    - County - Douglas
+    - County - Ferry
+    - County - Franklin
+    - County - Garfield
+    - County - Grant
+    - County - Grays Harbor
+    - County - Island
+    - County - Jefferson
+    - County - King
+    - County - Kitsap
+    - County - Kittitas
+    - County - Klickitat
+    - County - Lewis
+    - County - Lincoln
+    - County - Mason
+    - County - Okanogan
+    - County - Pacific
+    - County - Pend Oreille
+    - County - Pierce
+    - County - San Juan
+    - County - Skagit
+    - County - Skamania
+    - County - Snohomish
+    - County - Spokane
+    - County - Stevens
+    - County - Thurston
+    - County - Wahkiakum
+    - County - Walla Walla
+    - County - Whatcom
+    - County - Whitman
+    - County - Yakima
+    - LHJ - Adams County Integrated Health Care Services
+    - LHJ - Asotin County Public Health
+    - LHJ - Benton-Franklin Health District
+    - LHJ - Chelan-Douglas Health District
+    - LHJ - Clallam County Health and Human Services
+    - LHJ - Clark County Public Health
+    - LHJ - Columbia County Public Health
+    - LHJ - Cowlitz County Health and Human Services
+    - LHJ - Garfield County Health District
+    - LHJ - Grant County Health District
+    - LHJ - Grays Harbor Public Health and Social Services
+    - LHJ - Island County Public Health
+    - LHJ - Jefferson County Public Health
+    - LHJ - Kitsap Public Health District
+    - LHJ - Kittitas County Public Health
+    - LHJ - Klickitat County Public Health
+    - LHJ - Lewis County Public Health and Social Services
+    - LHJ - Lincoln County Health Department
+    - LHJ - Mason County Public Health
+    - LHJ - Northeast Tri County Health District
+    - LHJ - Okanogan County Public Health
+    - LHJ - Pacific County Health and Human Services
+    - LHJ - San Juan County Health and Community Services
+    - LHJ - Seattle and King County Public Health
+    - LHJ - Skagit County Public Health
+    - LHJ - Skamania County Community Health
+    - LHJ - Snohomish Health District
+    - LHJ - Spokane Regional Health District
+    - LHJ - Tacoma-Pierce County Health Department
+    - LHJ - Thurston County Public Health and Social Services
+    - LHJ - Wahkiakum County Public Health and Human Services
+    - LHJ - Walla Walla County Community Health
+    - LHJ - Whatcom County Health Department
+    - LHJ - Whitman County Public Health
+    - LHJ - Yakima Health District 
+    input: select
+    multiple: FALSE
+  exclude_sections:
+    label: "Exclude Sections"
+    value: ""
+    choices:
+    - Falls ED
+    - MVC ED
+    - Carbon Monoxide Poisoning ED
+    - Asthma ED
+    input: select
+    multiple: TRUE
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+
+if(!require("pacman")) install.packages("pacman")
+
+pacman::p_load(Rnssp, tidyverse, ggplot2, gt, flextable, MMWRweek, janitor, patchwork, cowplot, scales)
+
+
+#Load in myProfile for API pulls
+load("~/myProfileNSSP.Rda")
+myProfile <- myProfileNSSP
+
+# Source the functions file -- should be updated for this version
+source("https://raw.githubusercontent.com/sara-chronister/synchron/refs/heads/main/R/get_longterm_data.R")
+source("autotemplate_functions_LHJ.R")
+
+# Read in geography crosswalk 
+geogdf <- read.csv("Support Resources/WA_Geo_API_Crosswalk.csv")
+
+geogdfnew <- geogdf %>%
+  select(-EMS, -CDC_Facility_HSA, -CDC_Patient_HSA, -PHEPR) %>%
+  dplyr::mutate(County = paste("County - ",County, sep = ""),
+         State = paste("State - ",State, sep = ""),
+         StateRegion = paste("State Region - ",StateRegion, sep = ""),
+         ACH = paste("ACH - ",ACH, sep = ""),
+         RMO = paste("RMO - ",RMO, sep = ""),
+         LHJ = paste("LHJ - ",LHJ, sep = "")) %>%
+  tidyr::pivot_longer(!APIsyntax, names_to = "Level", values_to ="Geography") %>%
+  dplyr::select(!Level) %>%
+  dplyr::filter(Geography==params$geog)
+
+api_geog <- paste0(geogdfnew$APIsyntax, collapse = "")
+
+geog_name <- params$geog # clean up a bit
+
+# Read in Weather Station crosswalk
+weather <- read.csv("Support Resources/Weather_Station_API_Crosswalk.csv")
+weatherdf <- weather %>%
+  dplyr::mutate(County = paste("County - ",County, sep = ""),
+         State = paste("State - ",State, sep = ""),
+         StateRegion = paste("State Region - ",StateRegion, sep = ""),
+         ACH = paste("ACH - ",ACH, sep = ""),
+         RMO = paste("RMO - ",RMO, sep = ""),
+         LHJ = paste("LHJ - ",LHJ, sep = ""),
+         All_Geo = "All (May include patients outside WA)") %>%
+  tidyr::pivot_longer(!c("APIsyntax", "Station"), names_to = "Level", values_to ="Geography") %>%
+  dplyr::select(!Level) %>%
+  dplyr::filter(Geography==params$geog)
+
+api_weather <- paste0(weatherdf$APIsyntax, collapse = "")
+
+
+```
+
+<!-- Parameters -->
+
+```{r parameters}
+
+# Dates
+start_date <- params$start_date # Start date of reporting period for APIs
+end_date <- params$end_date # End date of reporting period for APIs
+end_date_neat <- format(params$end_date, "%b %d, %Y")  #re-format date for readability
+start_date_neat <- format(start_date, "%b %d, %Y") 
+
+# Data source
+
+if(params$data_source == "Facility Location"){
+  data_source = "&datasource=va_hosp&geographySystem=hospitalregion"
+} else{
+  data_source = "&datasource=va_er&geographySystem=region"
+}
+
+# Section Exclusions
+include_falls <- !("Falls ED" %in% params$exclude_section)
+include_MVC <- !("MVC ED" %in% params$exclude_section)
+include_CO <- !("CO ED" %in% params$exclude_section)
+include_asthma <- !("Asthma ED" %in% params$exclude_section)
+
+```
+
+
+<!-- Pull Weather Data -->
+
+```{r weather, results ='hide'}
+# Weather data API pull - Time Series
+
+# Only pull the weather data if the selected geography actually has weather data in ESSENCE
+if(nrow(weatherdf) > 0){
+
+weather_ts <- paste0("https://essence.syndromicsurveillance.org/nssp_essence/api/timeSeries?percentParam=noPercent&endDate=7Jul2023&userId=5695&weatherFactor=mintemp&datasource=va_weather_aggr&stationAggregateFunc=min&timeResolution=daily&aqtTarget=TimeSeries&detector=probrepswitch&timeAggregateFunc=min&startDate=6May2023", api_weather)
+
+ts_weather <- Rnssp::get_essence_data(weather_ts, start_date = start_date, end_date = end_date)
+
+ts_weather <- ts_weather %>%
+  dplyr::rename(temp = count) %>%
+  dplyr::mutate(date = as.Date(date))
+
+# Replace 0 with NA in the last row only
+ts_weather[nrow(ts_weather), "temp" ][ts_weather[nrow(ts_weather), "temp" ] == 0] <- NA
+
+}
+
+```
+
+```{r airquality, results ='hide'}
+
+# Air Quality Data - Pull in a list of all WA stations
+url <- "https://essence2.syndromicsurveillance.org/nssp_essence/api/dataDetails/csv?percentParam=noPercent&endDate=01Dec2023&airQualityParameterName=pm2.5-24hr&userId=1983&graphTitle=WA_Daily%20Max%20PM2.5&datasource=airquality&State=wa&stationAggregateFunc=max&timeResolution=daily&aqtTarget=TimeSeries&detector=probrepswitch&timeAggregateFunc=max&startDate=01May23"
+airqualityOG <- get_essence_data(url, start_date = start_date, end_date = end_date)
+
+airqualityOG2 <- airqualityOG %>%
+  mutate(APIsyntax= paste0("&airQualityStation=", Station),
+         County = gsub("; WA", "", County),
+         County = str_to_title(County))
+
+# Join freshly pulled air quality data to the geography crosswalk table by county
+    # We're doing this because we don't have an air quality crosswalk like we do with the weather temperature stations, so we're making one
+geogdfaq <- geogdf %>%
+  select(County, State, StateRegion,  ACH, RMO, LHJ, PHEPR) %>%
+  distinct()
+
+airquality <- left_join(airqualityOG2, geogdfaq, by = "County")
+
+airqualitydf <- airquality %>%
+  dplyr::mutate(County = paste("County - ",County, sep = ""),
+                State = paste("State - ",State, sep = ""),
+                StateRegion = paste("State Region - ",StateRegion, sep = ""),
+                ACH = paste("ACH - ",ACH, sep = ""),
+                RMO = paste("RMO - ",RMO, sep = ""),
+                LHJ = paste("LHJ - ",LHJ, sep = ""),
+                All_Geo = "All (May include patients outside WA)",
+                Date = as.Date(Date, format = "%m/%d/%Y")) %>%
+  select(Date, Station, Value, County, State, StateRegion, APIsyntax, ACH, RMO, LHJ, PHEPR, All_Geo) %>%
+  tidyr::pivot_longer(!c("APIsyntax", "Station", "Date", "Value"), names_to = "Level", values_to ="Geography") %>%
+  dplyr::filter(Geography==params$geog)
+
+if(nrow(airqualitydf) > 0){
+# keep max PM2.5 value each day for selected geography
+ts_airquality <- airqualitydf %>%
+  arrange(Date, Geography, desc(Value)) %>%
+  distinct(Date, Geography, .keep_all = TRUE) %>%
+  select(date = Date,  aq = Value)
+
+# Replace 0 with NA in the last row only
+ts_airquality[nrow(ts_airquality), "aq" ][ts_airquality[nrow(ts_airquality), "aq" ] == 0] <- NA
+}
+
+```
+
+<!-- Pull Data Details -->
+
+```{r denomdatadetails}
+
+#ESSENCE data details fields to include
+fields_list <-  list("Date","Sex", "AgeGroup", "c_ethnicity","c_race","Region", "HospitalRegion", "CCDDCategory_flat")
+
+# Add &field= before each field
+field <- paste(paste0("&field=",fields_list), collapse="")
+
+
+dd_allcause <- paste0("https://essence.syndromicsurveillance.org/nssp_essence/api/dataDetails?startDate=16Dec2025&medicalGroupingSystem=essencesyndromes&userId=5695&endDate=18Dec2025&percentParam=noPercent&site=934&hospFacilityType=emergency%20care&aqtTarget=DataDetails&detector=probrepswitch&timeResolution=daily&hasBeenE=1&refValues=true", data_source, api_geog, field)
+
+dd_denom <- get_longterm_data(dd_allcause, start_date = start_date, end_date = end_date )
+
+```
+
+```{r numdatadetails}
+
+# Pull out all the condition-specific data details numerator data by CCDDCategory_flat
+    # If there are no visits for one of the CCDD categories, will return data frame with zero rows
+cri <- dd_denom %>%
+  filter(grepl("Cold Related Illness v1", CCDDCategory_flat))
+
+asthma <- dd_denom %>%
+  filter(grepl("Severe Asthma v1", CCDDCategory_flat))
+
+mvc <- dd_denom %>%
+  filter(grepl("All Traffic Related v2", CCDDCategory_flat))
+
+co <- dd_denom %>%
+  filter(grepl("CDC Unintentional Carbon Monoxide Exposure v1", CCDDCategory_flat))
+
+# Falls - pull own API (custom definition, edited CCDD but all ages)
+
+falls_url <- paste0("https://essence.syndromicsurveillance.org/nssp_essence/api/dataDetails?startDate=22Dec2025&medicalGroupingSystem=essencesyndromes&userId=5695&ccddFreeText=(,(,%5Erolled%20off%20bed%5E,or,%5Erolled%20out%20of%20bed%5E,or,%5Elos%5Ebalance%5E,or,%5Estumbl%5E,or,%5Eslip%5E,andnot,(,%5Edyslipidemia%5E,or,%5Epink%20slip%5E,or,%5Eslipped%20dis%5E,or,%5Eslip%20dis%5E,or,%5Edisc%20slip%5E,or,%5Eslipper%5E,),or,%5Etrip%5E,andnot,(,%5Eatrip%5E,or,%5Eamytript%5E,or,%5Etrip%20to%5E,or,%5Estrip%5E,or,%5Elithotripsy%5E,or,%5Etripod%5E,or,%5Ebus%20trip%5E,or,%5Etriple%5E,),or,(,%5Efall%5E,andnot,(,%5Efallopian%5E,or,%5Eno%20fall%5E,or,%5Edenies%20fall%5E,or,%20%5Edenies%20any%20fall%5E,or,%5Edenies%20recent%20fall%5E,or,%5Edenies%20any%20recent%20fall%5E,or,%5Ewithout%20fall%5E,or,%5Ew/o%20fall%5E,),or,%20%5Efell%5E,andnot,(,%5Ecatheter%20fell%5E,or,%5Etube%20fell%5E,),),andnot,(,%5Easleep%5E,or,%5E%5B;/%20%5DW20%5E,or,%5E%5B;/%20%5DV80%5E,or,%5Eassault%5E,or,%5Eassult%5E,or,%5Ealtercation%5E,or,%5Efight%5E,or,%5Esuicid%5E,or,%5Eseizure%5E,or,%5Eheart%20attack%5E,or,%5Estroke%5E,andnot,%5Ehistory%20of%20stroke%5E,or,(,%5Eischemic%20attack%5E,or,%5Ecardiac%20arrest%5E,),andnot,%5E%5B;/%20%5DZ86%5E,or,(,%5Ecollision%5E,and,%5Evehicle%5E,),),),or,(,%5E%5B;/%20%5DV00%5B1-8%5D_1%5E,or,%5E%5B;/%20%5DV00.%5B1-8%5D_1%5E,or,%5E%5B;/%20%5DW0%5E,or,%5E%5B;/%20%5DW1%5B0-579%5D%5E,or,%5E%5B;/%20%5DW16%5B01235678%5D_2%5E,or,%5E%5B;/%20%5DW16.%5B01235678%5D_2%5E,or,%5E%5B;/%20%5DW1642%5E,or,%5E%5B;/%20%5DW16.42%5E,or,%5E%5B;/%20%5DW1692%5E,or,%5E%5B;/%20%5DW16.92%5E,or,%5E%5B;/%20%5DW18%5B1-3%5D%5E,or,%5E%5B;/%20%5DW18.%5B1-3%5D%5E,),),andnot,(,(,%5E%5B;/%20%5D%5BWV%5D%5B01%5D____%5BDS%5D%5E,or,%5E%5B;/%20%5D%5BWV%5D%5B01%5D_.___%5BDS%5D%5E,),andnot,(,%5E%5B;/%20%5D%5BWV%5D%5B01%5D____%5BA%20%5D%5E,or,%5E%5B;/%20%5D%5BWV%5D%5B01%5D_.___%5BA%20%5D%5E,),)&endDate=23Dec2025&percentParam=noPercent&site=934&hospFacilityType=emergency%20care&aqtTarget=DataDetails&detector=probrepswitch&timeResolution=daily&hasBeenE=1&refValues=true", data_source, api_geog, field)
+
+falls <- get_essence_data(falls_url, start_date = start_date, end_date = end_date )
+
+
+```
+
+
+```{r stop_silently, echo=FALSE, include=FALSE}
+# If there aren't any CRI visits - force quit script
+if (nrow(cri) == 0){
+  stop()
+}
+
+# If script errors out at this chunk- that means there were no CRI visits. Try expanding date range.
+
+```
+
+```{r}
+
+# Pull time series data
+
+timeseries_url <- paste0("https://essence.syndromicsurveillance.org/nssp_essence/api/timeSeries?startDate=23Sep25&medicalGroupingSystem=essencesyndromes&userId=5695&endDate=22Dec25&percentParam=ccddCategory&site=934&hospFacilityType=emergency%20care&aqtTarget=TimeSeries&ccddCategory=all%20traffic%20related%20v2&ccddCategory=cdc%20unintentional%20carbon%20monoxide%20exposure%20v1&ccddCategory=cold%20related%20illness%20v1&ccddCategory=severe%20asthma%20v1&detector=probrepswitch&timeResolution=daily&hasBeenE=1&stratVal=ccddCategory&multiStratVal=&graphOnly=true&numSeries=4&graphOptions=single&seriesPerYear=false&nonZeroComposite=false&removeZeroSeries=true&startMonth=January&stratVal=ccddCategory&multiStratVal=&graphOnly=true&numSeries=4&graphOptions=single&seriesPerYear=false&startMonth=January&nonZeroComposite=false", data_source, api_geog)
+
+all_timeseries <- Rnssp::get_essence_data(timeseries_url, start_date = start_date, end_date = end_date)
+all_timeseries <- all_timeseries %>%
+  select(date,
+         Percent = count, 
+         alert_percent = color,
+         Count = dataCount,
+         alert_count = color_dataCount,
+         Category = ccddCategory_id) %>%
+  mutate(date = as.Date(date, format = "%Y-%m-%d")) %>%
+  ## NEW
+  mutate(alert_percent = ifelse(alert_percent == "grey", "blue", alert_percent),
+         alert_count = ifelse(alert_count == "grey", "blue", alert_count))
+
+# Subset CCDD category time series
+# If there are no visits for one of the CCDD categories, will return data frame with zero rows
+cri_timeseries <- all_timeseries %>%
+  filter(Category == "Cold Related Illness v1")
+
+co_timeseries <- all_timeseries %>%
+  filter(Category == "CDC Unintentional Carbon Monoxide Exposure v1")
+
+asthma_timeseries <- all_timeseries %>%
+  filter(Category == "Severe Asthma v1")
+
+mvc_timeseries <- all_timeseries %>%
+  filter(Category == "All Traffic Related v2")
+
+#Falls
+# If there are no visits for falls -- will still return a dataframe with a row for every day in your pull, just counts/percents will be zero!
+
+# Time series falls -- percent
+falls_timeseries_percent_url <- paste0("https://essence.syndromicsurveillance.org/nssp_essence/api/timeSeries?startDate=16Dec2025&medicalGroupingSystem=essencesyndromes&userId=5695&ccddFreeText=(,(,%5Erolled%20off%20bed%5E,or,%5Erolled%20out%20of%20bed%5E,or,%5Elos%5Ebalance%5E,or,%5Estumbl%5E,or,%5Eslip%5E,andnot,(,%5Edyslipidemia%5E,or,%5Epink%20slip%5E,or,%5Eslipped%20dis%5E,or,%5Eslip%20dis%5E,or,%5Edisc%20slip%5E,or,%5Eslipper%5E,),or,%5Etrip%5E,andnot,(,%5Eatrip%5E,or,%5Eamytript%5E,or,%5Etrip%20to%5E,or,%5Estrip%5E,or,%5Elithotripsy%5E,or,%5Etripod%5E,or,%5Ebus%20trip%5E,or,%5Etriple%5E,),or,(,%5Efall%5E,andnot,(,%5Efallopian%5E,or,%5Eno%20fall%5E,or,%5Edenies%20fall%5E,or,%20%5Edenies%20any%20fall%5E,or,%5Edenies%20recent%20fall%5E,or,%5Edenies%20any%20recent%20fall%5E,or,%5Ewithout%20fall%5E,or,%5Ew/o%20fall%5E,),or,%20%5Efell%5E,andnot,(,%5Ecatheter%20fell%5E,or,%5Etube%20fell%5E,),),andnot,(,%5Easleep%5E,or,%5E%5B;/%20%5DW20%5E,or,%5E%5B;/%20%5DV80%5E,or,%5Eassault%5E,or,%5Eassult%5E,or,%5Ealtercation%5E,or,%5Efight%5E,or,%5Esuicid%5E,or,%5Eseizure%5E,or,%5Eheart%20attack%5E,or,%5Estroke%5E,andnot,%5Ehistory%20of%20stroke%5E,or,(,%5Eischemic%20attack%5E,or,%5Ecardiac%20arrest%5E,),andnot,%5E%5B;/%20%5DZ86%5E,or,(,%5Ecollision%5E,and,%5Evehicle%5E,),),),or,(,%5E%5B;/%20%5DV00%5B1-8%5D_1%5E,or,%5E%5B;/%20%5DV00.%5B1-8%5D_1%5E,or,%5E%5B;/%20%5DW0%5E,or,%5E%5B;/%20%5DW1%5B0-579%5D%5E,or,%5E%5B;/%20%5DW16%5B01235678%5D_2%5E,or,%5E%5B;/%20%5DW16.%5B01235678%5D_2%5E,or,%5E%5B;/%20%5DW1642%5E,or,%5E%5B;/%20%5DW16.42%5E,or,%5E%5B;/%20%5DW1692%5E,or,%5E%5B;/%20%5DW16.92%5E,or,%5E%5B;/%20%5DW18%5B1-3%5D%5E,or,%5E%5B;/%20%5DW18.%5B1-3%5D%5E,),),andnot,(,(,%5E%5B;/%20%5D%5BWV%5D%5B01%5D____%5BDS%5D%5E,or,%5E%5B;/%20%5D%5BWV%5D%5B01%5D_.___%5BDS%5D%5E,),andnot,(,%5E%5B;/%20%5D%5BWV%5D%5B01%5D____%5BA%20%5D%5E,or,%5E%5B;/%20%5D%5BWV%5D%5B01%5D_.___%5BA%20%5D%5E,),)&endDate=23Dec2025&percentParam=ccddFreeText&site=934&hospFacilityType=emergency%20care&aqtTarget=TimeSeries&detector=probrepswitch&timeResolution=daily&hasBeenE=1", data_source, api_geog)
+
+falls_timeseries_percent <- Rnssp::get_essence_data(falls_timeseries_percent_url, start_date = start_date, end_date = end_date)
+
+falls_timeseries_percent <- falls_timeseries_percent %>%
+  select(date,
+         Percent = count, 
+         alert_percent = color) %>%
+  mutate(Category = "Falls",
+         date = as.Date(date, format = "%Y-%m-%d")) %>%
+  ## NEW
+  mutate(alert_percent = ifelse(alert_percent == "grey", "blue", alert_percent))
+
+# Time series falls -- count
+# Must pull count separately because percent pull does not include dataCount columns for some reason
+
+falls_timeseries_count_url <- paste0("https://essence.syndromicsurveillance.org/nssp_essence/api/timeSeries?datasource=va_hosp&startDate=16Dec2025&medicalGroupingSystem=essencesyndromes&userId=5695&ccddFreeText=(,(,%5Erolled%20off%20bed%5E,or,%5Erolled%20out%20of%20bed%5E,or,%5Elos%5Ebalance%5E,or,%5Estumbl%5E,or,%5Eslip%5E,andnot,(,%5Edyslipidemia%5E,or,%5Epink%20slip%5E,or,%5Eslipped%20dis%5E,or,%5Eslip%20dis%5E,or,%5Edisc%20slip%5E,or,%5Eslipper%5E,),or,%5Etrip%5E,andnot,(,%5Eatrip%5E,or,%5Eamytript%5E,or,%5Etrip%20to%5E,or,%5Estrip%5E,or,%5Elithotripsy%5E,or,%5Etripod%5E,or,%5Ebus%20trip%5E,or,%5Etriple%5E,),or,(,%5Efall%5E,andnot,(,%5Efallopian%5E,or,%5Eno%20fall%5E,or,%5Edenies%20fall%5E,or,%20%5Edenies%20any%20fall%5E,or,%5Edenies%20recent%20fall%5E,or,%5Edenies%20any%20recent%20fall%5E,or,%5Ewithout%20fall%5E,or,%5Ew/o%20fall%5E,),or,%20%5Efell%5E,andnot,(,%5Ecatheter%20fell%5E,or,%5Etube%20fell%5E,),),andnot,(,%5Easleep%5E,or,%5E%5B;/%20%5DW20%5E,or,%5E%5B;/%20%5DV80%5E,or,%5Eassault%5E,or,%5Eassult%5E,or,%5Ealtercation%5E,or,%5Efight%5E,or,%5Esuicid%5E,or,%5Eseizure%5E,or,%5Eheart%20attack%5E,or,%5Estroke%5E,andnot,%5Ehistory%20of%20stroke%5E,or,(,%5Eischemic%20attack%5E,or,%5Ecardiac%20arrest%5E,),andnot,%5E%5B;/%20%5DZ86%5E,or,(,%5Ecollision%5E,and,%5Evehicle%5E,),),),or,(,%5E%5B;/%20%5DV00%5B1-8%5D_1%5E,or,%5E%5B;/%20%5DV00.%5B1-8%5D_1%5E,or,%5E%5B;/%20%5DW0%5E,or,%5E%5B;/%20%5DW1%5B0-579%5D%5E,or,%5E%5B;/%20%5DW16%5B01235678%5D_2%5E,or,%5E%5B;/%20%5DW16.%5B01235678%5D_2%5E,or,%5E%5B;/%20%5DW1642%5E,or,%5E%5B;/%20%5DW16.42%5E,or,%5E%5B;/%20%5DW1692%5E,or,%5E%5B;/%20%5DW16.92%5E,or,%5E%5B;/%20%5DW18%5B1-3%5D%5E,or,%5E%5B;/%20%5DW18.%5B1-3%5D%5E,),),andnot,(,(,%5E%5B;/%20%5D%5BWV%5D%5B01%5D____%5BDS%5D%5E,or,%5E%5B;/%20%5D%5BWV%5D%5B01%5D_.___%5BDS%5D%5E,),andnot,(,%5E%5B;/%20%5D%5BWV%5D%5B01%5D____%5BA%20%5D%5E,or,%5E%5B;/%20%5D%5BWV%5D%5B01%5D_.___%5BA%20%5D%5E,),)&endDate=23Dec2025&percentParam=noPercent&site=934&hospFacilityType=emergency%20care&aqtTarget=TimeSeries&geographySystem=hospitalregion&detector=probrepswitch&timeResolution=daily&hasBeenE=1")
+
+falls_timeseries_count <- Rnssp::get_essence_data(falls_timeseries_count_url, start_date = start_date, end_date = end_date)
+falls_timeseries_count <- falls_timeseries_count %>%
+  select(date,
+         Count = count, 
+         alert_count = color) %>%
+  mutate(Category = "Falls",
+         date = as.Date(date, format = "%Y-%m-%d")) %>%
+  ## NEW
+  mutate(alert_count = ifelse(alert_count == "grey", "blue", alert_count))
+
+
+```
+
+<!-- Summary Calculations -->
+
+```{r calcs}
+
+# Total CRI visits in report period
+cri_visitcount <- nrow(cri)
+
+# Create the CRI demographic table and pull summary metrics out from it
+cri_table <- create_flextable(denomdf = dd_denom, numdf = cri, title = "CRI")
+
+# Save the flextable object as a dataframe for manipulation
+extracted_cri_table <- cri_table$body$dataset
+
+cri_table2 <- extracted_cri_table[, 1:3]
+cri_table2[c("Count", "Percent")] <- str_split_fixed(cri_table2[,3], " ", 2)
+cri_table2$Count <- gsub(",",  "", cri_table2$Count ) # clean commas from count column, they don't play nice
+cri_table2$Count <- as.numeric(cri_table2$Count) #make count numeric
+
+max <- cri_table2 %>%
+  group_by(Demographic) %>%              # Group by demographic field
+  mutate(MaxCount = max(Count)) %>%    # Get max value in each group 
+  filter(Count == MaxCount) %>%
+  mutate(Percent = gsub("[()]", "", Percent))
+
+agegroupmax <- max$Group[max$Demographic == "AgeGroup"]
+ageprop <- unique(max$Percent[max$Demographic == "AgeGroup"])
+sexmax <- max$Group[max$Demographic == "Sex"]
+sexprop <- unique(max$Percent[max$Demographic == "Sex"])
+racemax <- max$Group[max$Demographic == "Race"]
+raceprop <- unique(max$Percent[max$Demographic == "Race"])
+ethnicitymax <- max$Group[max$Demographic == "Ethnicity"]
+ethnicityprop <- unique(max$Percent[max$Demographic == "Ethnicity"])
+
+# Is CRI alerting?
+percent_elevated <- any(cri_timeseries$alert_percent %in% c( "red", "yellow") )
+ count_elevated <- any(cri_timeseries$alert_count %in% c( "red", "yellow") )
+ 
+ if(percent_elevated == "TRUE" | count_elevated == "TRUE"){
+   elevated <- "were elevated"
+ } else{elevated <- "were not elevated"}
+
+```
+
+# `r if(params$geog != "All (May include patients outside WA)"){geog_name} else{"Washington State"}`
+Winter hazards are defined as outdoor conditions, extreme weather events, or recreational activities and can cause various adverse health effects resulting in healthcare visits. This report contains weather data and analyses of healthcare encounter data for winter hazards, including suspected cold-related illness (CRI), asthma, carbon monoxide exposure related visits, slips and falls, and motor vehicle crash emergency department (ED) visits based on data reported to the Rapid Health Information NetwOrk (RHINO).
+
+# Key Findings: `r start_date_neat` to `r end_date_neat`
+
+CRI ED visits `r elevated` on at least one day during the reporting period.[^1] There were a **total of `r cri_visitcount` CRI ED visits**. The **`r agegroupmax` age group** had the highest proportion of visits (`r ageprop`). `r sexprop` of visits were **`r tolower(sexmax)`** patients. Patients of **`r tolower(racemax)` race** (`r raceprop`) and **`r tolower(ethnicitymax)` ethnicity** (`r ethnicityprop`) accounted for the most visits.
+
+[^1]: Daily visit counts are considered elevated if values exceed what was expected statistically. See Data Notes for additional information.
+
+# Cold-Related Illness (CRI)
+
+Extreme cold may lead to CRI including hypothermia and frostbite, particularly in young children and older adults, and those who work or recreate outdoors. To reduce the risk of CRI, dress warmly, stay as dry as possible, and limit time outdoors when it is cold.
+
+## CRI ED Visits Over Time
+
+```{r cri_plot, dpi=300, fig.width=7, fig.height=3.5, echo=FALSE}
+
+
+p1 <- timeseries_plot_weather(df = cri_timeseries,  metric = "Percent", alert= "alert_percent",  title = "Cold-Related Percent ED Visits", ylab = "Percent", weatherlab = "Min Temperature (F)", weatherfactor = "Temp") +
+  theme(
+      legend.position = "none", # no legend for first plot
+      axis.title.x = element_blank(),  # Remove x-axis title
+        axis.text.x  = element_blank(),  # Remove x-axis text
+        axis.ticks.x = element_blank())  
+
+p2 <- timeseries_plot_weather(df = cri_timeseries,  metric = "Count", alert= "alert_count",  title = "Cold-Related ED Visit Count", ylab = "Count", weatherlab = "Min Temperature (F)", weatherfactor = "Temp") +
+  theme(
+    legend.title = element_text(size = 8, face = "bold"),  # Legend title font
+    legend.text  = element_text(size = 8)) 
+
+#Combine with shared x-axis
+(p1 / p2) +
+  plot_annotation(
+    theme = theme(plot.margin = margin(5, 5, 5, 5))
+  ) & 
+  theme(axis.title.x = element_blank())
+
+
+```
+
+```{=openxml}
+<w:p><w:r><w:br w:type="page"/></w:r></w:p>
+```
+
+## Populations Impacted
+
+Table 1. Demographics of CRI and all-cause ED visits `r start_date_neat` to `r end_date_neat`
+
+```{r cri_table}
+
+cri_table
+
+```
+
+```{=openxml}
+<w:p><w:r><w:br w:type="page"/></w:r></w:p>
+```
+
+
+<!--# Carbon Monoxide (CO) Exposure
+Embedding text in the code chunks so that it only renders based on condition that there are non-zero visit counts.-->
+
+```{r CO_plot, dpi=300, fig.width=7, fig.height=3.0, echo=FALSE, eval = include_CO,  results = 'asis'}
+
+if(nrow(co_timeseries) >0) {
+  
+cat("# Carbon Monoxide (CO) Exposure\n")
+cat("Extreme cold can indirectly lead to CO exposure. CO is a deadly gas that cannot be seen or smelled. To reduce risk of CO poisoning, do not use gas stoves for heating and use generators outdoors. \n\n")
+
+cat("## CO Exposure-Related ED Visits Over Time\n\n")
+
+
+p1 <- timeseries_plot_weather(df = co_timeseries,  metric = "Percent", alert= "alert_percent",  title = "CO-Related Percent ED Visits", ylab = "Visit Percent", weatherlab = "Min Temperature (F)", weatherfactor = "Temp") +
+  theme(
+      legend.position = "none", # no legend for first plot
+      axis.title.x = element_blank(),  # Remove x-axis title
+        axis.text.x  = element_blank(),  # Remove x-axis text
+        axis.ticks.x = element_blank()) 
+
+p2 <- timeseries_plot_weather(df = co_timeseries,  metric = "Count", alert= "alert_count",  title = "CO-Related ED Visit Count", ylab = "Visit Count", weatherlab = "Min Temperature (F)", weatherfactor = "Temp") +
+  theme(
+    legend.title = element_text(size = 8, face = "bold"),  # Legend title font
+    legend.text  = element_text(size = 8)) 
+
+(p1 / p2) +
+  plot_annotation(
+    theme = theme(plot.margin = margin(5, 5, 5, 5))
+  ) & 
+  theme(axis.title.x = element_blank()) 
+}
+
+```
+
+
+```{r co_table, eval = include_CO,  results = 'asis', echo=FALSE}
+if(nrow(co_timeseries) >0) {
+cat("## Populations Impacted\n\n")
+  
+cat(paste("Table 2. Demographics of CO and all-cause ED visits", start_date_neat, "to", end_date_neat, ". \n\n", sep = " "))
+
+co_table<- create_flextable(denomdf = dd_denom, numdf = co, title = "CO")
+co_table
+}
+```
+
+
+<!--# Asthma
+Outdoor air pollutants, indoor environmental contaminants, climate, exercise, colds and other respiratory infections, among other causes, can trigger or exacerbate asthma symptoms. 
+
+## Asthma-Related ED Visits Over Time-->
+
+```{r asthma_plot, dpi=300, fig.width=7, fig.height=3.0, echo=FALSE, eval = include_asthma,  results = 'asis'}
+
+if(nrow(asthma_timeseries) >0) {
+  
+cat("# Asthma\n")
+cat("Outdoor air pollutants, indoor environmental contaminants, climate, exercise, colds and other respiratory infections, among other causes, can trigger or exacerbate asthma symptoms. \n\n")
+
+cat("## Asthma-Related ED Visits Over Time\n\n")
+
+p1 <- timeseries_plot_weather(df = asthma_timeseries,  metric = "Percent", alert= "alert_percent",  title = "Asthma-Related Percent ED Visits", ylab = "Visit Percent", weatherlab = "Max PM2.5 (ug/m^3)", weatherfactor = "AQ") +
+  theme(
+      legend.position = "none", # no legend for first plot
+      axis.title.x = element_blank(),  # Remove x-axis title
+        axis.text.x  = element_blank(),  # Remove x-axis text
+        axis.ticks.x = element_blank()) 
+  
+
+p2 <- timeseries_plot_weather(df = asthma_timeseries,  metric = "Count", alert= "alert_count",  title = "Asthma-Related ED Visit Count", ylab = "Visit Count", weatherlab = "Max PM2.5 (ug/m^3)", weatherfactor = "AQ") +
+  theme(
+    legend.title = element_text(size = 8, face = "bold"),  # Legend title font
+    legend.text  = element_text(size = 8)) 
+
+
+(p1 / p2) +
+  plot_annotation(
+    theme = theme(plot.margin = margin(5, 5, 5, 5))
+  ) & 
+  theme(axis.title.x = element_blank()) 
+}
+
+```
+
+
+```{r asthma_table, eval = include_asthma,  results = 'asis', echo=FALSE}
+if(nrow(asthma_timeseries) >0) {
+
+cat("## Populations Impacted\n\n")
+cat(paste("Table 3. Demographics of asthma and all-cause ED visits", start_date_neat, "to", end_date_neat, ". \n\n", sep = " "))
+  
+asthma_table <- create_flextable(denomdf = dd_denom, numdf = asthma, title = "Asthma")
+asthma_table
+}
+```
+
+<!--# Falls
+Hazardous winter weather including snow and ice may increase slips and falls. To avoid slips and falls, wear proper footwear, be cautious and take your time, and maintain clear paths of travel.
+
+## Fall-Related ED Visits Over Time-->
+
+```{r fall_plot, dpi=300, fig.width=7, fig.height=3.0, echo=FALSE, eval = include_falls,  results = 'asis'}
+
+if(nrow(falls) >0) {
+  
+cat("# Falls \n")
+cat("Hazardous winter weather including snow and ice may increase slips and falls. To avoid slips and falls, wear proper footwear, be cautious and take your time, and maintain clear paths of travel. \n\n")
+
+cat("## Fall-Related ED Visits Over Time\n\n")
+
+p1 <- timeseries_plot_weather(df = falls_timeseries_percent,  metric = "Percent", alert= "alert_percent",  title = "Fall-Related Percent ED Visits", ylab = "Visit Percent", weatherlab = "Min Temperature (F)", weatherfactor = "Temp") +
+  theme(
+      legend.position = "none", # no legend for first plot
+      axis.title.x = element_blank(),  # Remove x-axis title
+        axis.text.x  = element_blank(),  # Remove x-axis text
+        axis.ticks.x = element_blank()) 
+
+p2 <- timeseries_plot_weather(df = falls_timeseries_count,  metric = "Count", alert= "alert_count",  title = "Fall-Related ED Visit Count", ylab = "Visit Count", weatherlab = "Min Temperature (F)", weatherfactor = "Temp") +
+  theme(
+    legend.title = element_text(size = 8, face = "bold"),  # Legend title font
+    legend.text  = element_text(size = 8)) 
+
+
+(p1 / p2) +
+  plot_annotation(
+    theme = theme(plot.margin = margin(5, 5, 5, 5))
+  ) & 
+  theme(axis.title.x = element_blank()) 
+}
+```
+
+```{r falls_table, eval = include_falls,  results = 'asis', echo=FALSE}
+if(nrow(falls) >0) {
+  
+cat("## Populations Impacted\n\n")
+cat(paste("Table 5. Demographics of fall and all-cause ED visits", start_date_neat, "to", end_date_neat, ". \n\n", sep = " "))
+
+falls_table <-create_flextable(denomdf = dd_denom, numdf = falls, title = "Falls")
+falls_table
+}
+```
+
+<!--# Motor Vehicle Crash (MVC)
+Hazardous winter weather including snow and ice may lead to an increase in motor vehicle crashes and other traffic-related ED visits. Avoid unnecessary travel in hazardous weather conditions.
+
+## MVC-Related ED Visits Over Time-->
+
+```{r mvc_plot, dpi=300, fig.width=7, fig.height=3.0, echo=FALSE, eval = include_MVC,  results = 'asis'}
+
+if(nrow(mvc_timeseries) >0) {
+  
+cat("# Motor Vehicle Crash (MVC) \n")
+cat("Hazardous winter weather including snow and ice may lead to an increase in motor vehicle crashes and other traffic-related ED visits. Avoid unnecessary travel in hazardous weather conditions. \n\n")
+
+cat("## MVC-Related ED Visits Over Time\n\n")
+
+p1 <- timeseries_plot_weather(df = mvc_timeseries,  metric = "Percent", alert= "alert_percent",  title = "MVC-Related Percent ED Visits", ylab = "Visit Percent", weatherlab = "Min Temperature (F)", weatherfactor = "Temp") +
+  theme(
+      legend.position = "none", # no legend for first plot
+      axis.title.x = element_blank(),  # Remove x-axis title
+        axis.text.x  = element_blank(),  # Remove x-axis text
+        axis.ticks.x = element_blank()) 
+
+p2 <- timeseries_plot_weather(df = mvc_timeseries,  metric = "Count", alert= "alert_count",  title = "MVC-Related ED Visit Count", ylab = "Visit Count", weatherlab = "Min Temperature (F)", weatherfactor = "Temp") +
+  theme(
+    legend.title = element_text(size = 8, face = "bold"),  # Legend title font
+    legend.text  = element_text(size = 8)) 
+
+
+(p1 / p2) +
+  plot_annotation(
+    theme = theme(plot.margin = margin(5, 5, 5, 5))
+  ) & 
+  theme(axis.title.x = element_blank()) 
+}
+```
+
+
+```{r mvc_table, eval = include_MVC,  results = 'asis', echo=FALSE}
+if(nrow(mvc_timeseries) >0) {
+  
+cat("## Populations Impacted\n\n")
+cat(paste("Table 5. Demographics of MVC and all-cause ED visits", start_date_neat, "to", end_date_neat, ". \n\n", sep = " "))
+
+mvc_table <- create_flextable(denomdf = dd_denom, numdf = mvc, title = "MVC")
+mvc_table
+}
+
+```
+
+# Data Notes
+
+This report contains analyses of healthcare encounter data for seasonal hazards based on data reported to the Washington State Deparatment of Health's Rapid Health Information NetwOrk (RHINO). All non-federal hospitals across Washington State report healthcare encounter data in near real-time to RHINO. Data are preliminary and may change. Data reflect unique healthcare visits, and do not represent unique individuals.
+
+Air quality data is obtained from regulatory monitoring sites managed and collected by regional clean air agencies and the Washington State Department of Ecology and provided by AirNow. The maximum PM2.5 concentration (ug/m^3^) on that day is displayed. Temperature data is obtained from the CF6 dataset maintained by the National Weather Service. Data reflects the minimum temperature recorded each day.
+
+Red and yellow points on time series correspond to values that exceed what was expected statistically (alerts), with red indicating larger deviations. Bolded demographic bins in tables represent groups with statistically significant differences between condition-specific and all-cause ED visit counts, as determined by chi-square test standardized pearson residuals (significance threshold: residuals > 3).
+
+For additional seasonal hazards information including more county-specific information, please see the public-facing RHINO [Seasonal Hazards Dashboard](https://doh.wa.gov/public-health-provider-resources/healthcare-professions-and-facilities/data-exchange/syndromic-surveillance-rhino/seasonal-hazards-dashboard).
+
+## Visit Definitions
+
+*If one of the below conditions is not included in this report, then there were no visits identified.*
+
+**Cold-related Illness:** Identified through the CDC ESSENCE Chief Complaint Discharge Diagnosis (CCDD) query category, Cold Related Illness V1, using free text terms such as “cold exp,” “environmental exp” and “hypothe” and ICD-10-CM diagnosis codes (including X31, T68, T69, T33) among ED chief complaints and discharge diagnoses. For more info see: [CRI Factsheet](https://knowledgerepository.syndromicsurveillance.org/cold-related-illness-cste).
+
+**Unintentional Carbon Monoxide Exposure:** Identified through the CDC ESSENCE Chief Complaint Discharge Diagnosis (CCDD) query category, CDC Unintentional Carbon Monoxide Exposure v1, using free text terms such as "carbon m", "CO pois" and ICD-10-CM diagnosis codes (including T58.0, T58.9) among ED chief complaints and discharge diagnoses.
+
+**Asthma:** Identified through the CDC ESSENCE Chief Complaint Discharge Diagnosis (CCDD) query category, Severe Asthma v1, using free text terms such as "asthma attack" or "asthma exacerbation" or diagnosis codes related to acute asthma (J45) or acute bronchospasm (J98.01) among ED chief complaints and discharge diagnoses. For more info, see: [Severe Asthma Factsheet](https://knowledgerepository.syndromicsurveillance.org/sites/default/files/2025-07/Severe%20Asthma%20v1%20Factsheet.pdf).
+
+**Falls:** These visits were identified through a modified version of the CDC ESSENCE Chief Complaint Discharge Diagnosis (CCDD) query category, CDC Falls 65 and Older v1, using free text terms such as “trip” and “fall” and fall-related ICD-10-CM diagnosis codes among chief complaints and discharge diagnoses.
+
+**Traffic:** Identified through the CDC ESSENCE Chief Complaint Discharge Diagnosis (CCDD) query category, All Traffic Related v2, using free text terms such as “motor vehicle crash” and “car accident” and traffic-related ICD-10-CM diagnosis codes among chief complaints, admit reasons, and discharge diagnoses. Captures traffic-related visits involving pedestrians, cyclists, and/or motor vehicle occupants.
+
+
+

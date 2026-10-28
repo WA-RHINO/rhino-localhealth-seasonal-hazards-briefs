@@ -1,0 +1,22 @@
+Station,County,State,StateRegion,APIsyntax,ACH,RMO,LHJ,PHEPR
+WA - BELLINGHAM WA AIRPORT,Whatcom,WA,Western WA,&stationID=sew-bli,North Sound ACH,Northwest Waterway,Whatcom County Health Department,North Emergency Planning Region
+WA - DALLESPORT,Klickitat,WA,Eastern WA,&stationID=pdt-dls,Southwest Washington ACH,South Gorge,Klickitat County Public Health,South Central Emergency Planning Region
+WA - DEER_PARK WA AIRPORT,Spokane,WA,Eastern WA,&stationID=otx-dew,Better Health Together,Eastern Plains,Spokane Regional Health District,East Emergency Planning Region
+WA - ELLENSBURG,Kittitas,WA,Eastern WA,&stationID=pdt-eln,Greater Columbia ACH,Central Corridor,Kittitas County Public Health,North Central Emergency Planning Region
+WA - EPHRATA WA AIRPORT,Grant,WA,Eastern WA,&stationID=otx-eph,North Central ACH,Central Corridor,Grant County Health District,North Central Emergency Planning Region
+WA - HOQUIAM WA AIRPORT,Grays Harbor,WA,Western WA,&stationID=sew-hqm,Cascade Pacific Action Alliance,Northwest Waterway,Grays Harbor Public Health and Social Services,West Emergency Planning Region
+WA - LEWISTON ID AIRPORT,,WA,Eastern WA,&stationID=otx-lws,,,,
+WA - MOSES LAKE WA AIRPORT,Grant,WA,Eastern WA,&stationID=otx-mwh,North Central ACH,Central Corridor,Grant County Health District,North Central Emergency Planning Region
+WA - OLYMPIA WA AIRPORT,Thurston,WA,Western WA,&stationID=sew-olm,Cascade Pacific Action Alliance,South Gorge,Thurston County Public Health and Social Services,West Emergency Planning Region
+WA - OMAK WA AIRPORT,Okanogan,WA,Eastern WA,&stationID=otx-omk,North Central ACH,Central Corridor,Okanogan County Public Health,North Central Emergency Planning Region
+WA - PASCO,Franklin,WA,Eastern WA,&stationID=pdt-psc,Greater Columbia ACH,Eastern Plains,Benton-Franklin Health District,South Central Emergency Planning Region
+WA - PULLMAN_MOSCOW AIRPORT,Whitman,WA,Eastern WA,&stationID=otx-puw,Greater Columbia ACH,Eastern Plains,Whitman County Public Health,East Emergency Planning Region
+WA - QUILLAYUTE WA AIRPORT,Clallam,WA,Western WA,&stationID=sew-uil,Olympic Community of Health,Northwest Waterway,Clallam County Health and Human Services,Northwest Emergency Planning Region
+WA - SEATTLE WA INFO,King,WA,Western WA,&stationID=sew-sew,King County ACH,Northwest Waterway,Seattle and King County Public Health,Central Emergency Planning Region
+WA - SEATTLE-TACOMA WA AIRPORT,King,WA,Western WA,&stationID=sew-sea,King County ACH,Northwest Waterway,Seattle and King County Public Health,Central Emergency Planning Region
+WA - SPOKANE WA AIRPORT,Spokane,WA,Eastern WA,&stationID=otx-geg,Better Health Together,Eastern Plains,Spokane Regional Health District,East Emergency Planning Region
+WA - SPOKANE WA FELTS AIRPORT,Spokane,WA,Eastern WA,&stationID=otx-sff,Better Health Together,Eastern Plains,Spokane Regional Health District,East Emergency Planning Region
+WA - VANCOUVER,Clark,WA,Western WA,&stationID=pqr-vuo,Southwest Washington ACH,South Gorge,Clark County Public Health,Southwest Emergency Planning Region
+WA - WALLA WALLA,Walla Walla,WA,Eastern WA,&stationID=pdt-alw,Greater Columbia ACH,Eastern Plains,Walla Walla County Community Health,South Central Emergency Planning Region
+WA - WENATCHEE WA PANGBORN FIELD,Douglas,WA,Eastern WA,&stationID=otx-eat,North Central ACH,Central Corridor,Chelan-Douglas Health District,North Central Emergency Planning Region
+WA - YAKIMA,Yakima,WA,Eastern WA,&stationID=pdt-ykm,Greater Columbia ACH,South Gorge,Yakima Health District,South Central Emergency Planning Region

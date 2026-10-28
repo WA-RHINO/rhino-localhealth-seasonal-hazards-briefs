@@ -1,0 +1,728 @@
+---
+output:
+  word_document: 
+    reference_docx: "Support Resources/template_hri.docx"
+params:
+  start_date:
+    label: "Enter Start Date: "
+    value: !r Sys.Date()-7
+    input: date
+  end_date:
+    label: "Enter End Date: "
+    value: !r Sys.Date() -1
+    input: date
+  data_source:
+    label: "Select a Data Source: Patient location will include data for all residents of the selected geography, treated at any ED in WA. Facility location will include data for all EDs in the selected geography."
+    value: "Facility Location"
+    choices:
+      - Patient Location
+      - Facility Location
+  geog:
+    label: "Select Geography"
+    value: "County - Adams"
+    choices:
+    - County - Adams
+    - County - Asotin
+    - County - Benton
+    - County - Chelan
+    - County - Clallam
+    - County - Clark
+    - County - Columbia
+    - County - Cowlitz
+    - County - Douglas
+    - County - Ferry
+    - County - Franklin
+    - County - Garfield
+    - County - Grant
+    - County - Grays Harbor
+    - County - Island
+    - County - Jefferson
+    - County - King
+    - County - Kitsap
+    - County - Kittitas
+    - County - Klickitat
+    - County - Lewis
+    - County - Lincoln
+    - County - Mason
+    - County - Okanogan
+    - County - Pacific
+    - County - Pend Oreille
+    - County - Pierce
+    - County - San Juan
+    - County - Skagit
+    - County - Skamania
+    - County - Snohomish
+    - County - Spokane
+    - County - Stevens
+    - County - Thurston
+    - County - Wahkiakum
+    - County - Walla Walla
+    - County - Whatcom
+    - County - Whitman
+    - County - Yakima
+    - LHJ - Adams County Integrated Health Care Services
+    - LHJ - Asotin County Public Health
+    - LHJ - Benton-Franklin Health District
+    - LHJ - Chelan-Douglas Health District
+    - LHJ - Clallam County Health and Human Services
+    - LHJ - Clark County Public Health
+    - LHJ - Columbia County Public Health
+    - LHJ - Cowlitz County Health and Human Services
+    - LHJ - Garfield County Health District
+    - LHJ - Grant County Health District
+    - LHJ - Grays Harbor Public Health and Social Services
+    - LHJ - Island County Public Health
+    - LHJ - Jefferson County Public Health
+    - LHJ - Kitsap Public Health District
+    - LHJ - Kittitas County Public Health
+    - LHJ - Klickitat County Public Health
+    - LHJ - Lewis County Public Health and Social Services
+    - LHJ - Lincoln County Health Department
+    - LHJ - Mason County Public Health
+    - LHJ - Northeast Tri County Health District
+    - LHJ - Okanogan County Public Health
+    - LHJ - Pacific County Health and Human Services
+    - LHJ - San Juan County Health and Community Services
+    - LHJ - Seattle and King County Public Health
+    - LHJ - Skagit County Public Health
+    - LHJ - Skamania County Community Health
+    - LHJ - Snohomish Health District
+    - LHJ - Spokane Regional Health District
+    - LHJ - Tacoma-Pierce County Health Department
+    - LHJ - Thurston County Public Health and Social Services
+    - LHJ - Wahkiakum County Public Health and Human Services
+    - LHJ - Walla Walla County Community Health
+    - LHJ - Whatcom County Health Department
+    - LHJ - Whitman County Public Health
+    - LHJ - Yakima Health District 
+    input: select
+    multiple: FALSE
+  exclude_sections:
+    label: "Exclude Sections"
+    value: ""
+    choices:
+    - Drowning ED
+    - Boating ED
+    - Smoke ED
+    - Asthma ED
+    input: select
+    multiple: TRUE
+---
+
+<!-- Parameters -->
+
+```{r setup1, include = FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+
+if(!require("pacman")) install.packages("pacman")
+
+pacman::p_load(Rnssp, tidyverse, ggplot2, gt, flextable, MMWRweek, janitor, patchwork, cowplot, scales)
+
+# Dates
+start_date <- params$start_date # Start date of reporting period for APIs
+end_date <- params$end_date # End date of reporting period for APIs
+
+end_date_neat <- format(params$end_date, "%b %d, %Y")  #re-format date for readability
+start_date_neat <- format(start_date, "%b %d, %Y") 
+
+# Data source
+
+if(params$data_source == "Facility Location"){
+  data_source = "&datasource=va_hosp&geographySystem=hospitalregion"
+} else{
+  data_source = "&datasource=va_er&geographySystem=region"
+}
+
+# Section Exclusions
+include_drown <- !("Drowning ED" %in% params$exclude_section)
+include_boat <- !("Boating ED" %in% params$exclude_section)
+include_smoke <- !("Smoke ED" %in% params$exclude_section)
+include_asthma <- !("Asthma ED" %in% params$exclude_section)
+
+```
+
+```{r setup2, include=FALSE}
+
+#Load in myProfile for API pulls
+load("~/myProfileNSSP.Rda")
+myProfile <- myProfileNSSP
+
+# Source the functions file -- should be updated for this version
+source("https://raw.githubusercontent.com/sara-chronister/synchron/refs/heads/main/R/get_longterm_data.R")
+source("autotemplate_functions_LHJ.R")
+
+# Read in geography crosswalk 
+geogdf <- read.csv("Support Resources/WA_Geo_API_Crosswalk.csv")
+
+geogdfnew <- geogdf %>%
+  select(-EMS, -CDC_Facility_HSA, -CDC_Patient_HSA, -PHEPR) %>%
+  dplyr::mutate(County = paste("County - ",County, sep = ""),
+         State = paste("State - ",State, sep = ""),
+         StateRegion = paste("State Region - ",StateRegion, sep = ""),
+         ACH = paste("ACH - ",ACH, sep = ""),
+         RMO = paste("RMO - ",RMO, sep = ""),
+         LHJ = paste("LHJ - ",LHJ, sep = "")) %>%
+  tidyr::pivot_longer(!APIsyntax, names_to = "Level", values_to ="Geography") %>%
+  dplyr::select(!Level) %>%
+  dplyr::filter(Geography==params$geog)
+
+api_geog <- paste0(geogdfnew$APIsyntax, collapse = "")
+
+geog_name <- params$geog # clean up a bit
+
+# Read in Weather Station crosswalk
+weather <- read.csv("Support Resources/Weather_Station_API_Crosswalk.csv")
+weatherdf <- weather %>%
+  dplyr::mutate(County = paste("County - ",County, sep = ""),
+         State = paste("State - ",State, sep = ""),
+         StateRegion = paste("State Region - ",StateRegion, sep = ""),
+         ACH = paste("ACH - ",ACH, sep = ""),
+         RMO = paste("RMO - ",RMO, sep = ""),
+         LHJ = paste("LHJ - ",LHJ, sep = ""),
+         All_Geo = "All (May include patients outside WA)") %>%
+  tidyr::pivot_longer(!c("APIsyntax", "Station"), names_to = "Level", values_to ="Geography") %>%
+  dplyr::select(!Level) %>%
+  dplyr::filter(Geography==params$geog)
+
+api_weather <- paste0(weatherdf$APIsyntax, collapse = "")
+
+```
+
+
+<!-- Pull Weather Data -->
+
+```{r weather, results ='hide'}
+# Weather data API pull - Time Series
+
+# Only pull the weather data if the selected geography actually has weather data in ESSENCE
+if(nrow(weatherdf) > 0){
+
+weather_ts <- paste0("https://essence2.syndromicsurveillance.org/nssp_essence/api/timeSeries?percentParam=noPercent&endDate=7Jul2023&userId=5695&weatherFactor=maxtemp&datasource=va_weather_aggr&stationAggregateFunc=max&timeResolution=daily&aqtTarget=TimeSeries&detector=probrepswitch&timeAggregateFunc=max&startDate=6May2023", api_weather)
+
+ts_weather <- Rnssp::get_essence_data(weather_ts, start_date = start_date, end_date = end_date)
+
+ts_weather <- ts_weather %>%
+  dplyr::rename(temp = count) %>%
+  dplyr::mutate(date = as.Date(date))
+
+# Replace 0 with NA in the last row only
+ts_weather[nrow(ts_weather), "temp" ][ts_weather[nrow(ts_weather), "temp" ] == 0] <- NA
+
+}
+
+```
+
+```{r airquality, results ='hide'}
+
+# Air Quality Data - Pull in a list of all WA stations. 
+url <- "https://essence2.syndromicsurveillance.org/nssp_essence/api/dataDetails/csv?percentParam=noPercent&endDate=01Dec2023&airQualityParameterName=pm2.5-24hr&userId=1983&graphTitle=WA_Daily%20Max%20PM2.5&datasource=airquality&State=wa&stationAggregateFunc=max&timeResolution=daily&aqtTarget=TimeSeries&detector=probrepswitch&timeAggregateFunc=max&startDate=01May23"
+airqualityOG <- get_essence_data(url, start_date = start_date, end_date = end_date)
+
+airqualityOG2 <- airqualityOG %>%
+  mutate(APIsyntax= paste0("&airQualityStation=", Station),
+         County = gsub("; WA", "", County),
+         County = str_to_title(County))
+
+geogdfaq <- geogdf %>%
+  select(County, State, StateRegion,  ACH, RMO, LHJ, PHEPR) %>%
+  distinct()
+
+airquality <- left_join(airqualityOG2, geogdfaq, by = "County")
+
+airqualitydf <- airquality %>%
+  dplyr::mutate(County = paste("County - ",County, sep = ""),
+                State = paste("State - ",State, sep = ""),
+                StateRegion = paste("State Region - ",StateRegion, sep = ""),
+                ACH = paste("ACH - ",ACH, sep = ""),
+                RMO = paste("RMO - ",RMO, sep = ""),
+                LHJ = paste("LHJ - ",LHJ, sep = ""),
+                All_Geo = "All (May include patients outside WA)",
+                Date = as.Date(Date, format = "%m/%d/%Y")) %>%
+  select(Date, Station, Value, County, State, StateRegion, APIsyntax, ACH, RMO, LHJ, PHEPR, All_Geo) %>%
+  tidyr::pivot_longer(!c("APIsyntax", "Station", "Date", "Value"), names_to = "Level", values_to ="Geography") %>%
+  dplyr::filter(Geography==params$geog)
+
+if(nrow(airqualitydf) > 0){
+# keep max PM2.5 value each day for selected geography
+ts_airquality <- airqualitydf %>%
+  arrange(Date, Geography, desc(Value)) %>%
+  distinct(Date, Geography, .keep_all = TRUE) %>%
+  select(date = Date,  aq = Value)
+
+# Replace 0 with NA in the last row only
+ts_airquality[nrow(ts_airquality), "aq" ][ts_airquality[nrow(ts_airquality), "aq" ] == 0] <- NA
+}
+
+
+```
+
+<!-- Pull Data Details -->
+
+```{r denomdatadetails}
+
+#ESSENCE data details fields to include
+fields_list <-  list("Date","Sex", "AgeGroup",  "c_ethnicity","c_race", "Region", "HospitalRegion", "CCDDCategory_flat")
+
+# Add &field= before each field
+field <- paste(paste0("&field=",fields_list), collapse="")
+
+
+dd_allcause <- paste0("https://essence.syndromicsurveillance.org/nssp_essence/api/dataDetails?startDate=16Dec2025&medicalGroupingSystem=essencesyndromes&userId=5695&endDate=18Dec2025&percentParam=noPercent&site=934&hospFacilityType=emergency%20care&aqtTarget=DataDetails&detector=probrepswitch&timeResolution=daily&hasBeenE=1&refValues=true", data_source, api_geog, field)
+
+dd_denom <- get_longterm_data(dd_allcause, start_date = start_date, end_date = end_date ) #if errors out, try get_essence_data
+
+```
+
+```{r numdatadetails}
+
+# Pull out all the condition-specific data details numerator data by CCDDCategory_flat
+    # If there are no visits for one of the CCDD categories, will return data frame with zero rows
+hri <- dd_denom %>%
+  filter(grepl("Heat Related Illness v2", CCDDCategory_flat))
+
+asthma <- dd_denom %>%
+  filter(grepl("Severe Asthma v1", CCDDCategory_flat))
+
+boat <- dd_denom %>%
+  filter(grepl("Recreational Boating Incidents v1", CCDDCategory_flat))
+
+drown <- dd_denom %>%
+  filter(grepl("CDC Unintentional Drowning v1", CCDDCategory_flat))
+
+# Smoke - pull own API (custom definition, DD only)
+
+smoke_url <- paste0("https://essence.syndromicsurveillance.org/nssp_essence/api/dataDetails?startDate=1May2025&medicalGroupingSystem=essencesyndromes&userId=5695&endDate=31Oct2025&percentParam=noPercent&hospFacilityType=emergency%20care&aqtTarget=DataDetails&detector=nodetectordetector&timeResolution=daily&hasBeenE=1&dischargeDiagnosis=%5E;J70.5%5E,or,%5E;J705%5E,or,%5E;T59.81%5E,or,%5E;T5981%5E,or,%5E;X01.1%5E,or,%5E;X011%5E,or,%5E;X08.8%5E,or,%5E;X088%5E&refValues=true&site=934", data_source, api_geog, field)
+
+smoke <- get_essence_data(smoke_url, start_date = start_date, end_date = end_date )
+ # If there are no visits for smoke, will return empty list-- convert to empty data frame or later lines will error out
+if (is.list(smoke) && !inherits(smoke, "data.frame")) {
+  smoke <- as.data.frame(smoke)
+}
+
+```
+
+
+```{r stop_silently, echo=FALSE, include=FALSE}
+# If there aren't any HRI visits - force quit script
+if (nrow(hri) == 0){
+  stop()
+}
+
+# If script errors out at this chunk- that means there were no HRI visits. Try expanding date range.
+
+```
+
+```{r}
+
+# Pull time series data - CCDDS
+
+timeseries_url <- paste0("https://essence.syndromicsurveillance.org/nssp_essence/api/timeSeries?startDate=23Sep25&medicalGroupingSystem=essencesyndromes&userId=5695&endDate=22Dec25&percentParam=ccddCategory&site=934&hospFacilityType=emergency%20care&aqtTarget=TimeSeries&ccddCategory=cdc%20unintentional%20drowning%20v1&ccddCategory=heat%20related%20illness%20v2&ccddCategory=severe%20asthma%20v1&ccddCategory=recreational%20boating%20incidents%20v1&detector=probrepswitch&timeResolution=daily&hasBeenE=1&stratVal=ccddCategory&multiStratVal=&graphOnly=true&numSeries=4&graphOptions=single&seriesPerYear=false&nonZeroComposite=false&removeZeroSeries=true&startMonth=January&stratVal=ccddCategory&multiStratVal=&graphOnly=true&numSeries=4&graphOptions=single&seriesPerYear=false&startMonth=January&nonZeroComposite=false", data_source, api_geog)
+
+
+all_timeseries <- Rnssp::get_essence_data(timeseries_url, start_date = start_date, end_date = end_date)
+all_timeseries <- all_timeseries %>%
+  select(date,
+         Percent = count, 
+         alert_percent = color,
+         Count = dataCount,
+         alert_count = color_dataCount,
+         Category = ccddCategory_id) %>%
+  mutate(date = as.Date(date, format = "%Y-%m-%d")) %>%
+  ## NEW
+  mutate(alert_percent = ifelse(alert_percent == "grey", "blue", alert_percent),
+         alert_count = ifelse(alert_count == "grey", "blue", alert_count))
+
+# Subset CCDD category time series
+# If there are no visits for one of the CCDD categories, will return data frame with zero rows
+
+hri_timeseries <- all_timeseries %>%
+  filter(Category == "Heat Related Illness v2")
+
+boat_timeseries <- all_timeseries %>%
+  filter(Category == "Recreational Boating Incidents v1")
+
+asthma_timeseries <- all_timeseries %>%
+  filter(Category == "Severe Asthma v1")
+
+drown_timeseries <- all_timeseries %>%
+  filter(Category == "CDC Unintentional Drowning v1")
+
+#Smoke
+# If there are no visits for smoke -- will still return a dataframe with a row for every day in your pull, just counts/percents will be zero!
+
+# Time series smoke -- percent
+smoke_timeseries_percent_url <- paste0("https://essence.syndromicsurveillance.org/nssp_essence/api/timeSeries?startDate=1May2025&medicalGroupingSystem=essencesyndromes&userId=5695&endDate=31Oct2025&percentParam=dischargeDiagnosis&site=934&hospFacilityType=emergency%20care&aqtTarget=TimeSeries&detector=probrepswitch&timeResolution=daily&hasBeenE=1&dischargeDiagnosis=%5E;J70.5%5E,or,%5E;J705%5E,or,%5E;T59.81%5E,or,%5E;T5981%5E,or,%5E;X01.1%5E,or,%5E;X011%5E,or,%5E;X08.8%5E,or,%5E;X088%5E", data_source, api_geog)
+
+smoke_timeseries_percent <- Rnssp::get_essence_data(smoke_timeseries_percent_url, start_date = start_date, end_date = end_date)
+
+smoke_timeseries_percent <- smoke_timeseries_percent %>%
+  select(date,
+         Percent = count, 
+         alert_percent = color) %>%
+  mutate(Category = "Falls",
+         date = as.Date(date, format = "%Y-%m-%d")) %>%
+  ## NEW
+  mutate(alert_percent = ifelse(alert_percent == "grey", "blue", alert_percent))
+
+# Time series smoke -- count
+# Must pull count separately because percent pull does not include dataCount columns for some reason
+
+smoke_timeseries_count_url <- paste0("https://essence.syndromicsurveillance.org/nssp_essence/api/timeSeries?startDate=1May2025&medicalGroupingSystem=essencesyndromes&userId=5695&endDate=31Oct2025&percentParam=noPercent&site=934&hospFacilityType=emergency%20care&aqtTarget=TimeSeries&detector=probrepswitch&timeResolution=daily&hasBeenE=1&dischargeDiagnosis=%5E;J70.5%5E,or,%5E;J705%5E,or,%5E;T59.81%5E,or,%5E;T5981%5E,or,%5E;X01.1%5E,or,%5E;X011%5E,or,%5E;X08.8%5E,or,%5E;X088%5E", data_source, api_geog)
+
+smoke_timeseries_count <- Rnssp::get_essence_data(smoke_timeseries_count_url, start_date = start_date, end_date = end_date)
+smoke_timeseries_count <- smoke_timeseries_count %>%
+  select(date,
+         Count = count, 
+         alert_count = color) %>%
+  mutate(Category = "Falls",
+         date = as.Date(date, format = "%Y-%m-%d")) %>%
+  ## NEW
+  mutate(alert_count = ifelse(alert_count == "grey", "blue", alert_count))
+
+
+```
+
+<!-- Summary Calculations -->
+
+```{r calcs}
+
+# Total HRI visits in report period
+hri_visitcount <- nrow(hri)
+
+# Create the hri demographic table and pull summary metrics out from it
+hri_table <- create_flextable(denomdf = dd_denom, numdf = hri, title = "HRI")
+
+# Save the flextable object as a dataframe for manipulation
+extracted_hri_table <- hri_table$body$dataset
+
+hri_table2 <- extracted_hri_table[, 1:3]
+hri_table2[c("Count", "Percent")] <- str_split_fixed(hri_table2[,3], " ", 2)
+hri_table2$Count <- gsub(",",  "", hri_table2$Count ) # clean commas from count column, they don't play nice
+hri_table2$Count <- as.numeric(hri_table2$Count) #make count numeric
+
+max <- hri_table2 %>%
+  group_by(Demographic) %>%              # Group by demographic field
+  mutate(MaxCount = max(Count)) %>%    # Get max value in each group 
+  filter(Count == MaxCount) %>%
+  mutate(Percent = gsub("[()]", "", Percent))
+
+agegroupmax <- max$Group[max$Demographic == "AgeGroup"]
+ageprop <- unique(max$Percent[max$Demographic == "AgeGroup"])
+sexmax <- max$Group[max$Demographic == "Sex"]
+sexprop <- unique(max$Percent[max$Demographic == "Sex"])
+racemax <- max$Group[max$Demographic == "Race"]
+raceprop <- unique(max$Percent[max$Demographic == "Race"])
+ethnicitymax <- max$Group[max$Demographic == "Ethnicity"]
+ethnicityprop <- unique(max$Percent[max$Demographic == "Ethnicity"])
+
+# Is hri alerting?
+percent_elevated <- any(hri_timeseries$alert_percent %in% c( "red", "yellow") )
+count_elevated <- any(hri_timeseries$alert_count %in% c( "red", "yellow") )
+ 
+ if(percent_elevated == "TRUE" | count_elevated == "TRUE"){
+   elevated <- "were elevated"
+ } else{elevated <- "were not elevated"}
+
+```
+
+# `r if(params$geog != "All (May include patients outside WA)"){geog_name} else{"Washington State"}`
+Summer hazards are defined as outdoor conditions, extreme weather events, or recreational activities and can cause various adverse health effects resulting in healthcare visits. This report contains weather data and analyses of healthcare encounter data for summer hazards, including suspected heat-related illness (HRI), asthma, smoke exposure related visits, drowning and submersion, and recreational boating-related emergency department (ED) visits based on data reported to the Rapid Health Information NetwOrk (RHINO).
+
+# Key Findings: `r start_date_neat` to `r end_date_neat`
+
+HRI ED visits `r elevated` on at least one day during the reporting period.[^1] There were a **total of `r hri_visitcount` HRI ED visits**. The **`r agegroupmax` age group** had the highest proportion of visits (`r ageprop`). `r sexprop` of visits were **`r tolower(sexmax)`** patients. Patients of **`r tolower(racemax)` race** (`r raceprop`) and **`r tolower(ethnicitymax)` ethnicity** (`r ethnicityprop`) accounted for the most visits.
+
+[^1]: Daily visit counts are considered elevated if values exceed what was expected statistically. See Data Notes for additional information.
+
+# Heat-Related Illness (HRI)
+
+Extreme heat may lead to heat-related illness (HRI), particularly in those with chronic conditions, pregnant individuals, young children and older adults, and those who work or recreate outdoors. To reduce the risk of HRI, stay indoor in air conditioned spaces or plan outdoor activities during cooler times of the day, drink plenty of fluids, and take frequent breaks when working outdoors. 
+
+## HRI ED Visits Over Time
+
+```{r hri_plot, dpi=300, fig.width=7, fig.height=3.5, echo=FALSE}
+
+
+p1 <- timeseries_plot_weather(df = hri_timeseries,  metric = "Percent", alert= "alert_percent",  title = "Heat-Related Percent ED Visits", ylab = "Visit Percent", weatherlab = "Max Temperature (F)", weatherfactor = "Temp") +
+  theme(
+      legend.position = "none", # no legend for first plot
+      axis.title.x = element_blank(),  # Remove x-axis title
+        axis.text.x  = element_blank(),  # Remove x-axis text
+        axis.ticks.x = element_blank())  
+
+p2 <- timeseries_plot_weather(df = hri_timeseries,  metric = "Count", alert= "alert_count",  title = "Heat-Related ED Visit Count", ylab = "Visit Count", weatherlab = "Max Temperature (F)", weatherfactor = "Temp") +
+  theme(
+    legend.title = element_text(size = 8, face = "bold"),  # Legend title font
+    legend.text  = element_text(size = 8)) 
+
+#Combine with shared x-axis
+(p1 / p2) +
+  plot_annotation(
+    theme = theme(plot.margin = margin(5, 5, 5, 5))
+  ) & 
+  theme(axis.title.x = element_blank()) &
+  ggplot2::scale_x_date(breaks = scales::breaks_pretty(),
+                            limits = c(min(hri_timeseries$date)-0.05, max(hri_timeseries$date)+0.1),
+                            expand = c(0, 0))
+
+
+```
+
+```{=openxml}
+<w:p><w:r><w:br w:type="page"/></w:r></w:p>
+```
+
+## Populations Impacted
+
+Table 1. Demographics of HRI and all-cause ED visits `r start_date_neat` to `r end_date_neat`
+
+```{r hri_table}
+
+hri_table
+
+```
+
+
+```{=openxml}
+<w:p><w:r><w:br w:type="page"/></w:r></w:p>
+```
+
+<!--# Recreational Boating
+Recreational boating can lead to serious injuries. To boat safely, check weather conditions, bring safety equipment, and share your route and contact information before heading out on the water.
+
+## Boating-Related ED Visits Over Time -->
+
+```{r boat_plot, dpi=300, fig.width=7, fig.height=3.0, echo=FALSE, eval = include_boat, results = 'asis'}
+
+if(nrow(boat_timeseries) >0) {
+  
+cat("# Recreational Boating\n")
+cat("Recreational boating can lead to serious injuries. To boat safely, check weather conditions, bring safety equipment, and share your route and contact information before heading out on the water. \n\n")
+
+cat("## Boating-Related ED Visits Over Time\n\n")
+
+p1 <- timeseries_plot_weather(df = boat_timeseries,  metric = "Percent", alert= "alert_percent",  title = "Boating-Related Percent ED Visits", ylab = "Visit Percent", weatherlab = "Max Temperature (F)", weatherfactor = "Temp") +
+  theme(
+      legend.position = "none", # no legend for first plot
+      axis.title.x = element_blank(),  # Remove x-axis title
+        axis.text.x  = element_blank(),  # Remove x-axis text
+        axis.ticks.x = element_blank()) 
+
+p2 <- timeseries_plot_weather(df = boat_timeseries,  metric = "Count", alert= "alert_count",  title = "Boating-Related ED Visit Count", ylab = "Visit Count", weatherlab = "Max Temperature (F)",  weatherfactor = "Temp") +
+  theme(
+    legend.title = element_text(size = 8, face = "bold"),  # Legend title font
+    legend.text  = element_text(size = 8)) 
+
+#Combine with shared x-axis
+(p1 / p2) +
+  plot_annotation(
+    theme = theme(plot.margin = margin(5, 5, 5, 5))
+  ) & 
+  theme(axis.title.x = element_blank()) &
+  ggplot2::scale_x_date(breaks = scales::breaks_pretty(),
+                            limits = c(min(boat_timeseries$date)-0.05, max(boat_timeseries$date)+0.1),
+                            expand = c(0, 0))
+}
+```
+
+<!--## Populations Impacted
+
+Table 2. Demographics of boating and all-cause ED visits `r start_date_neat` to `r end_date_neat -->
+
+```{r boat_table, eval = include_boat, results = 'asis', echo=FALSE}
+
+if(nrow(boat_timeseries) >0) {
+  
+cat("## Populations Impacted\n\n")
+  
+cat(paste("Table 2. Demographics of boating and all-cause ED visits", start_date_neat, "to", end_date_neat, ". \n\n", sep = " "))
+
+boattable <- create_flextable(denomdf = dd_denom, numdf = boat, title = "Boating")
+boattable
+}
+
+```
+
+<!--# Asthma
+Outdoor air pollutants, indoor environmental contaminants, climate, exercise, colds and other respiratory infections, among other causes, can trigger or exacerbate asthma symptoms. 
+
+## Asthma-Related ED Visits Over Time-->
+
+```{r asthma_plot, dpi=300, fig.width=7, fig.height=3.0, echo=FALSE, eval = include_asthma, results = 'asis'}
+
+if(nrow(asthma_timeseries) >0) {
+  
+cat("# Asthma\n")
+cat("Outdoor air pollutants, indoor environmental contaminants, climate, exercise, colds and other respiratory infections, among other causes, can trigger or exacerbate asthma symptoms. \n\n")
+
+cat("## Asthma-Related ED Visits Over Time\n\n")
+
+
+p1 <- timeseries_plot_weather(df = asthma_timeseries,  metric = "Percent", alert= "alert_percent",  title = "Asthma-Related Percent ED Visits", ylab = "Visit Percent", weatherlab = "Max PM2.5 (ug/m^3)", weatherfactor = "AQ") +
+  theme(
+      legend.position = "none", # no legend for first plot
+      axis.title.x = element_blank(),  # Remove x-axis title
+        axis.text.x  = element_blank(),  # Remove x-axis text
+        axis.ticks.x = element_blank()) 
+  
+
+p2 <- timeseries_plot_weather(df = asthma_timeseries,  metric = "Count", alert= "alert_count",  title = "Asthma-Related ED Visit Count", ylab = "Visit Count", weatherlab = "Max PM2.5 (ug/m^3)", weatherfactor = "AQ") +
+  theme(
+    legend.title = element_text(size = 8, face = "bold"),  # Legend title font
+    legend.text  = element_text(size = 8)) 
+
+
+#Combine with shared x-axis
+(p1 / p2) +
+  plot_annotation(
+    theme = theme(plot.margin = margin(5, 5, 5, 5))
+  ) & 
+  theme(axis.title.x = element_blank()) &
+  ggplot2::scale_x_date(breaks = scales::breaks_pretty(),
+                            limits = c(min(asthma_timeseries$date)-0.05, max(asthma_timeseries$date)+0.1),
+                            expand = c(0, 0))
+}
+```
+
+```{r asthma_table, eval = include_asthma, results = 'asis', echo=FALSE}
+if(nrow(asthma_timeseries) >0) {
+
+cat("## Populations Impacted\n\n")
+cat(paste("Table 3. Demographics of asthma and all-cause ED visits", start_date_neat, "to", end_date_neat, ". \n\n", sep = " "))
+  
+asthmatable <- create_flextable(denomdf = dd_denom, numdf = asthma, title = "Asthma")
+asthmatable
+
+}
+
+```
+
+<!--# Smoke Exposure
+Smoke-related ED visits are related to any smoke inhalation. Smoke-related visits may be elevated due to the presence of wildfires, fireworks, and/or localized events such as structure fires.
+
+## Smoke Exposure-Related ED Visits Over Time-->
+
+```{r smoke_plot, dpi=300, fig.width=7, fig.height=3.0, echo=FALSE, eval = include_smoke, results = 'asis'}
+
+# smoke time series will have data even if counts are zero, so look to data details for logic
+if(nrow(smoke) >0) {
+  
+cat("# Smoke Exposure\n")
+cat("Smoke-related ED visits are related to any smoke inhalation. Smoke-related visits may be elevated due to the presence of wildfires, fireworks, and/or localized events such as structure fires. \n\n")
+
+cat("## Smoke Exposure-Related ED Visits Over Time\n\n")
+
+p1 <- timeseries_plot_weather(df = smoke_timeseries_percent,  metric = "Percent", alert= "alert_percent",  title = "Smoke-Related Percent ED Visits", ylab = "Visit Percent", weatherlab = "Max PM2.5 (ug/m^3)", weatherfactor = "AQ") +
+  theme(
+      legend.position = "none", # no legend for first plot
+      axis.title.x = element_blank(),  # Remove x-axis title
+        axis.text.x  = element_blank(),  # Remove x-axis text
+        axis.ticks.x = element_blank()) 
+
+p2 <- timeseries_plot_weather(df = smoke_timeseries_count,  metric = "Count", alert= "alert_count",  title = "Smoke-Related ED Visit Count", ylab = "Visit Count", weatherlab = "Max PM2.5 (ug/m^3)", weatherfactor = "AQ") +
+  theme(
+    legend.title = element_text(size = 8, face = "bold"),  # Legend title font
+    legend.text  = element_text(size = 8)) 
+
+#Combine with shared x-axis
+(p1 / p2) +
+  plot_annotation(
+    theme = theme(plot.margin = margin(5, 5, 5, 5))
+  ) & 
+  theme(axis.title.x = element_blank()) &
+  ggplot2::scale_x_date(breaks = scales::breaks_pretty(),
+                            limits = c(min(smoke_timeseries_count$date)-0.05, max(smoke_timeseries_count$date)+0.1),
+                            expand = c(0, 0))
+}
+```
+
+
+```{r smoke_table, eval = include_smoke, results = 'asis', echo=FALSE}
+if(nrow(smoke) >0) {
+cat("## Populations Impacted\n\n")
+cat(paste("Table 4. Demographics of smoke and all-cause ED visits", start_date_neat, "to", end_date_neat, ". \n\n", sep = " "))
+
+smoketable <- create_flextable(denomdf = dd_denom, numdf = smoke, title = "Smoke")
+smoketable
+}
+
+```
+
+<!--# Drowning and Submersion
+Water-related recreational activities may lead to an increase in submersions and drownings, most are preventable.
+
+## Drowning or Submersion-Related ED Visits Over Time-->
+
+```{r drown_plot, dpi=300, fig.width=7, fig.height=3.0, echo=FALSE, eval = include_drown, results = 'asis'}
+
+if(nrow(drown_timeseries) >0) {
+  
+cat("# Drowning and Submersion \n")
+cat("Water-related recreational activities may lead to an increase in drownings and submersions, most of which are preventable. \n\n")
+
+cat("## Drowning or Submersion-Related ED Visits Over Time\n\n")
+
+p1 <- timeseries_plot_weather(df = drown_timeseries,  metric = "Percent", alert= "alert_percent",  title = "Drowning or Submersion-Related Percent ED Visits", ylab = "Visit Percent", weatherlab = "Max Temperature (F)", weatherfactor = "Temp") +
+  theme(
+      legend.position = "none", # no legend for first plot
+      axis.title.x = element_blank(),  # Remove x-axis title
+        axis.text.x  = element_blank(),  # Remove x-axis text
+        axis.ticks.x = element_blank()) 
+
+p2 <- timeseries_plot_weather(df = drown_timeseries,  metric = "Count", alert= "alert_count",  title = "Drowning or Submersion-Related ED Visit Count", ylab = "Visit Count", weatherlab = "Max Temperature (F)", weatherfactor = "Temp") +
+  theme(
+    legend.title = element_text(size = 8, face = "bold"),  # Legend title font
+    legend.text  = element_text(size = 8)) 
+
+#Combine with shared x-axis
+(p1 / p2) +
+  plot_annotation(
+    theme = theme(plot.margin = margin(5, 5, 5, 5))
+  ) & 
+  theme(axis.title.x = element_blank()) &
+  ggplot2::scale_x_date(breaks = scales::breaks_pretty(),
+                            limits = c(min(drown_timeseries$date)-0.05, max(drown_timeseries$date)+0.1),
+                            expand = c(0, 0))
+
+}
+```
+
+
+```{r drown_table, eval = include_drown, results = 'asis', echo=FALSE}
+if(nrow(drown_timeseries) >0) {
+  
+cat("## Populations Impacted\n\n")
+cat(paste("Table 5. Demographics of drowning and all-cause ED visits", start_date_neat, "to", end_date_neat, ". \n\n", sep = " "))
+
+drowntable <- create_flextable(denomdf = dd_denom, numdf = drown, title = "Drowning")
+drowntable
+}
+
+```
+
+# Data Notes
+
+This report contains analyses of healthcare encounter data for seasonal hazards based on data reported to the Washington State Deparatment of Health's Rapid Health Information NetwOrk (RHINO). All non-federal hospitals across Washington State report healthcare encounter data in near real-time to RHINO. Data are preliminary and may change. Data reflect unique healthcare visits, and do not represent unique individuals.
+
+Air quality data is obtained from regulatory monitoring sites managed and collected by regional clean air agencies and the Washington State Department of Ecology and provided by AirNow. The maximum PM2.5 concentration (ug/m3) on that day is displayed. Temperature data is obtained from the CF6 dataset maintained by the National Weather Service. Data reflects the maximum temperature recorded each day.
+
+Red and yellow points on time series correspond to values that exceed what was expected statistically (alerts), with red indicating larger deviations. Bolded demographic bins in tables represent groups with statistically significant differences between condition-specific and all-cause ED visit counts, as determined by chi-square test standardized pearson residuals (significance threshold: residuals > 3).
+
+For additional seasonal hazards information including more county-specific information, please see the public-facing RHINO [Seasonal Hazards Dashboard](https://doh.wa.gov/public-health-provider-resources/healthcare-professions-and-facilities/data-exchange/syndromic-surveillance-rhino/seasonal-hazards-dashboard).
+
+## Visit Definitions
+
+*If one of the below conditions is not included in this report, then there were no visits identified.*
+
+**Heat-related Illness:** Identified through the CDC ESSENCE Chief Complaint Discharge Diagnosis (CCDD) query category, Heat-Related Illness V2, using free text terms such as “heat”, “sun stroke”, and “hyperthermia” and ICD-10-CM diagnosis codes (including E900, T67, X30) among ED chief complaints and discharge diagnoses. For more info, see: [HRI Factsheet](https://knowledgerepository.syndromicsurveillance.org/sites/default/files/2024-07/Heat%20Related%20Illness%20v2.pdf).
+
+**Boating-related:** Identified through the CDC ESSENCE Chief Complaint Discharge Diagnosis (CCDD) query category, Recreational Boating Incidents v1, using free text terms such as “boat", "jet ski”, and ICD-10-CM diagnosis codes (including V90-94, W16.7) among ED chief complaints and discharge diagnoses. For more info, see: [Recreational Boating Factsheet](https://cdn.ymaws.com/www.cste.org/resource/resmgr/images5/recreational_boating_inciden.pdf).
+
+**Asthma:** Identified through the CDC ESSENCE Chief Complaint Discharge Diagnosis (CCDD) query category, Severe Asthma v1, using free text terms such as "asthma attack" or "asthma exacerbation" or diagnosis codes related to acute asthma (J45) or acute bronchospasm (J98.01) among ED chief complaints and discharge diagnoses. For more info, see: [Severe Asthma Factsheet](https://knowledgerepository.syndromicsurveillance.org/sites/default/files/2025-07/Severe%20Asthma%20v1%20Factsheet.pdf).
+
+**Smoke-Inhalation:** Custom query applied to discharge diagnosis field. Visits identified using ICD-10 codes (J70.5, T59.81, X01.1, X08.8).
+
+**Drowning or submersion:** Identified through the CDC ESSENCE Chief Complaint Discharge Diagnosis (CCDD) query category, Unintentional Drowning V1, using free text terms such as “drown", "under water” and ICD-10-CM diagnosis codes (including T751, V90, V91, V92, W16, W22.041) among ED chief complaints and discharge diagnoses.
+
+
