@@ -1,4 +1,4 @@
-# RHINO Seasonal Hazards Briefs
+# RHINO Seasonal Hazards Briefs for LHJ Use
 This repo contains Rmarkdown files that knit together reports specific to local health jurisdictions in Washington for summer and winter conditions of interest alongside weather data. These reports include the same conditions seen on the public-facing Washington State [seasonal hazards dashboard](https://doh.wa.gov/public-health-provider-resources/healthcare-professions-and-facilities/data-exchange/syndromic-surveillance-rhino/seasonal-hazards-dashboard) and are designed to be used in supplement to provide more granular information during weather events. <b>Please note that because of the level of granularity, these reports are for internal purposes only and cannot be shared outside of public health.</b>
 
 ## Instructions:
